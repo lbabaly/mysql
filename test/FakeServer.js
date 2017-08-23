@@ -1,6 +1,7 @@
 // An experimental fake MySQL server for tricky integration tests. Expanded
 // as needed.
 
+var Buffer       = require('safe-buffer').Buffer;
 var common       = require('./common');
 var Charsets     = common.Charsets;
 var Crypto       = require('crypto');
@@ -17,7 +18,7 @@ var Util         = require('util');
 
 module.exports = FakeServer;
 Util.inherits(FakeServer, EventEmitter);
-function FakeServer(options) {
+function FakeServer() {
   EventEmitter.call(this);
 
   this._server      = null;
@@ -63,6 +64,7 @@ function FakeConnection(socket) {
   this._handshakeInitializationPacket = null;
   this._clientAuthenticationPacket    = null;
   this._oldPasswordPacket             = null;
+  this._authSwitchResponse            = null;
   this._handshakeOptions              = {};
 
   socket.on('data', this._handleData.bind(this));
@@ -72,8 +74,8 @@ FakeConnection.prototype.handshake = function(options) {
   this._handshakeOptions = options || {};
 
   var packetOpiotns = common.extend({
-    scrambleBuff1       : new Buffer('1020304050607080', 'hex'),
-    scrambleBuff2       : new Buffer('0102030405060708090A0B0C', 'hex'),
+    scrambleBuff1       : Buffer.from('1020304050607080', 'hex'),
+    scrambleBuff2       : Buffer.from('0102030405060708090A0B0C', 'hex'),
     serverCapabilities1 : 512, // only 1 flag, PROTOCOL_41
     protocol41          : true
   }, this._handshakeOptions);
@@ -85,20 +87,18 @@ FakeConnection.prototype.handshake = function(options) {
 
 FakeConnection.prototype.deny = function(message, errno) {
   this._sendPacket(new Packets.ErrorPacket({
-    message: message,
-    errno: errno
+    message : message,
+    errno   : errno
   }));
 };
 
-FakeConnection.prototype._sendAuthResponse = function(packet, expected) {
-  var got = packet.scrambleBuff;
-
+FakeConnection.prototype._sendAuthResponse = function _sendAuthResponse(got, expected) {
   if (expected.toString('hex') === got.toString('hex')) {
     this._sendPacket(new Packets.OkPacket());
   } else {
     this._sendPacket(new Packets.ErrorPacket({
-      message: 'expected ' + expected.toString('hex') + ' got ' + got.toString('hex'),
-      errno: Errors.ER_ACCESS_DENIED_ERROR
+      message : 'expected ' + expected.toString('hex') + ' got ' + got.toString('hex'),
+      errno   : Errors.ER_ACCESS_DENIED_ERROR
     }));
   }
 
@@ -268,9 +268,11 @@ FakeConnection.prototype._parsePacket = function(header) {
       this._clientAuthenticationPacket = packet;
       if (this._handshakeOptions.oldPassword) {
         this._sendPacket(new Packets.UseOldPasswordPacket());
+      } else if (this._handshakeOptions.authMethodName) {
+        this._sendPacket(new Packets.AuthSwitchRequestPacket(this._handshakeOptions));
       } else if (this._handshakeOptions.password === 'passwd') {
-        var expected = new Buffer('3DA0ADA7C9E1BB3A110575DF53306F9D2DE7FD09', 'hex');
-        this._sendAuthResponse(packet, expected);
+        var expected = Buffer.from('3DA0ADA7C9E1BB3A110575DF53306F9D2DE7FD09', 'hex');
+        this._sendAuthResponse(packet.scrambleBuff, expected);
       } else if (this._handshakeOptions.user || this._handshakeOptions.password) {
         throw new Error('not implemented');
       } else {
@@ -286,7 +288,14 @@ FakeConnection.prototype._parsePacket = function(header) {
 
       var expected = Auth.scramble323(this._handshakeInitializationPacket.scrambleBuff(), this._handshakeOptions.password);
 
-      this._sendAuthResponse(packet, expected);
+      this._sendAuthResponse(packet.scrambleBuff, expected);
+      break;
+    case Packets.AuthSwitchResponsePacket:
+      this._authSwitchResponse = packet;
+
+      var expected = Auth.token(this._handshakeOptions.password, Buffer.from('00112233445566778899AABBCCDDEEFF01020304', 'hex'));
+
+      this._sendAuthResponse(packet.data, expected);
       break;
     case Packets.ComQueryPacket:
       if (!this.emit('query', packet)) {
@@ -317,14 +326,14 @@ FakeConnection.prototype._parsePacket = function(header) {
       }
 
       this._clientAuthenticationPacket = new Packets.ClientAuthenticationPacket({
-        clientFlags  : this._clientAuthenticationPacket.clientFlags,
-        filler       : this._clientAuthenticationPacket.filler,
-        maxPacketSize: this._clientAuthenticationPacket.maxPacketSize,
-        protocol41   : this._clientAuthenticationPacket.protocol41,
-        charsetNumber: packet.charsetNumber,
-        database     : packet.database,
-        scrambleBuff : packet.scrambleBuff,
-        user         : packet.user
+        clientFlags   : this._clientAuthenticationPacket.clientFlags,
+        filler        : this._clientAuthenticationPacket.filler,
+        maxPacketSize : this._clientAuthenticationPacket.maxPacketSize,
+        protocol41    : this._clientAuthenticationPacket.protocol41,
+        charsetNumber : packet.charsetNumber,
+        database      : packet.database,
+        scrambleBuff  : packet.scrambleBuff,
+        user          : packet.user
       });
       this._sendPacket(new Packets.OkPacket());
       this._parser.resetPacketNumber();
@@ -352,6 +361,10 @@ FakeConnection.prototype._determinePacket = function(header) {
 
   if (this._handshakeOptions.oldPassword && !this._oldPasswordPacket) {
     return Packets.OldPasswordPacket;
+  }
+
+  if (this._handshakeOptions.authMethodName && !this._authSwitchResponse) {
+    return Packets.AuthSwitchResponsePacket;
   }
 
   var firstByte = this._parser.peak();

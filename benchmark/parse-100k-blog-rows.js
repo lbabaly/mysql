@@ -1,4 +1,5 @@
 var lib          = __dirname + '/../lib';
+var Buffer       = require('safe-buffer').Buffer;
 var Protocol     = require(lib + '/protocol/protocol');
 var Packets      = require(lib + '/protocol/packets');
 var PacketWriter = require(lib + '/protocol/PacketWriter');
@@ -6,10 +7,13 @@ var Parser       = require(lib + '/protocol/Parser');
 
 var options = {
   rows       : 100000,
-  bufferSize : 64 * 1024,
+  bufferSize : 64 * 1024
 };
 
+var buffers = createBuffers();
+
 console.error('Config:', options);
+run();
 
 function createBuffers() {
   var parser = new Parser();
@@ -17,21 +21,20 @@ function createBuffers() {
   process.stderr.write('Creating row buffers ... ');
 
   var number = 1;
-  var id     = 0;
   var start  = Date.now();
 
   var buffers = [
     createPacketBuffer(parser, new Packets.ResultSetHeaderPacket({fieldCount: 2})),
     createPacketBuffer(parser, new Packets.FieldPacket({catalog: 'foo', name: 'id'})),
     createPacketBuffer(parser, new Packets.FieldPacket({catalog: 'foo', name: 'text'})),
-    createPacketBuffer(parser, new Packets.EofPacket()),
+    createPacketBuffer(parser, new Packets.EofPacket())
   ];
 
   for (var i = 0; i < options.rows; i++) {
     buffers.push(createRowDataPacketBuffer(parser, number++));
   }
 
-  buffers.push(createPacketBuffer(parser, new Packets.EofPacket));
+  buffers.push(createPacketBuffer(parser, new Packets.EofPacket()));
 
   buffers = mergeBuffers(buffers);
 
@@ -39,7 +42,7 @@ function createBuffers() {
     return bytes + buffer.length;
   }, 0);
 
-  var mb = (bytes / 1024 / 1024).toFixed(2)
+  var mb = (bytes / 1024 / 1024).toFixed(2);
 
   console.error('%s buffers (%s mb) in %s ms', buffers.length, mb, (Date.now() - start));
 
@@ -52,7 +55,7 @@ function createPacketBuffer(parser, packet) {
   return writer.toBuffer(parser);
 }
 
-function createRowDataPacketBuffer(parser, number) {
+function createRowDataPacketBuffer(parser) {
   var writer = new PacketWriter();
 
   writer.writeLengthCodedString(parser._nextPacketNumber);
@@ -62,7 +65,7 @@ function createRowDataPacketBuffer(parser, number) {
 }
 
 function mergeBuffers(buffers) {
-  var mergeBuffer  = new Buffer(options.bufferSize);
+  var mergeBuffer  = Buffer.alloc(options.bufferSize);
   var mergeBuffers = [];
   var offset       = 0;
 
@@ -77,7 +80,7 @@ function mergeBuffers(buffers) {
       buffer.copy(mergeBuffer, offset, 0, bytesRemaining);
       mergeBuffers.push(mergeBuffer);
 
-      mergeBuffer = new Buffer(options.bufferSize);
+      mergeBuffer = Buffer.alloc(options.bufferSize);
       buffer.copy(mergeBuffer, 0, bytesRemaining);
       offset = buffer.length - bytesRemaining;
     }
@@ -95,7 +98,7 @@ function benchmark(buffers) {
   protocol._handshakeInitializationPacket = true;
   protocol.query({typeCast: false, sql: 'SELECT ...'});
 
-  var start = +new Date;
+  var start = +new Date();
 
   for (var i = 0; i < buffers.length; i++) {
     protocol.write(buffers[i]);
@@ -106,7 +109,7 @@ function benchmark(buffers) {
   console.log(hz);
 }
 
-var buffers = createBuffers();
-while (true) {
+function run() {
   benchmark(buffers);
+  process.nextTick(run);
 }
