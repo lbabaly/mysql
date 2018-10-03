@@ -8,11 +8,13 @@ node_js:
   - "2.5"
   - "3.3"
   - "4.2.0" # Test timers regression
-  - "4.8"
+  - "4.9"
   - "5.12"
-  - "6.11"
+  - "6.14"
   - "7.10"
-  - "8.1"
+  - "8.11"
+  - "9.11"
+  - "10.3"
 env:
   global:
     # Necessary to build Node.js 0.6 on Travis CI images
@@ -21,16 +23,20 @@ env:
     - "DOCKER_MYSQL_TYPE=mysql DOCKER_MYSQL_VERSION=5.7"
 matrix:
   include:
-    - node_js: "6.11"
+    - node_js: "6.14"
       env: "DOCKER_MYSQL_TYPE=mysql DOCKER_MYSQL_VERSION=5.5"
-    - node_js: "6.11"
+    - node_js: "6.14"
       env: "DOCKER_MYSQL_TYPE=mysql DOCKER_MYSQL_VERSION=5.6"
-    - node_js: "6.11"
+    - node_js: "6.14"
       env: "DOCKER_MYSQL_TYPE=mariadb DOCKER_MYSQL_VERSION=5.5"
-    - node_js: "6.11"
+    - node_js: "6.14"
       env: "DOCKER_MYSQL_TYPE=mariadb DOCKER_MYSQL_VERSION=10.0"
-    - node_js: "6.11"
+    - node_js: "6.14"
       env: "DOCKER_MYSQL_TYPE=mariadb DOCKER_MYSQL_VERSION=10.1"
+    - node_js: "6.14"
+      env: "DOCKER_MYSQL_TYPE=mariadb DOCKER_MYSQL_VERSION=10.2"
+    - node_js: "6.14"
+      env: "DOCKER_MYSQL_TYPE=mariadb DOCKER_MYSQL_VERSION=10.3"
 
 dist: trusty
 addons:
